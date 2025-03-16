@@ -25,7 +25,9 @@ thiserror = "2.0.12"
 anyhow = "1.0.75"
 
 # HTTP and API
-axum = "0.8.1"
+axum = { version = "0.8.1", features = ["macros"] }
+actix-web = "4.4"
+actix-cors = "0.7.1"
 tower = "0.5.2"
 tower-http = { version = "0.6.2", features = ["trace", "cors"] }
 hyper = "1.6.0"
@@ -61,3 +63,6 @@ lto = "thin"
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[dependencies]
+actix-web-httpauth = "0.8.2"

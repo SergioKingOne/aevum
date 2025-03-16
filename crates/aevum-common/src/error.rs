@@ -1,3 +1,4 @@
+use actix_web::{HttpResponse, error::ResponseError, http::StatusCode};
 use thiserror::Error;
 
 /// Common error type for Aevum operations.
@@ -35,6 +36,23 @@ pub enum Error {
 
     #[error("Unexpected error: {0}")]
     Unexpected(String),
+}
+
+impl ResponseError for Error {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            Self::NotFound(_) => StatusCode::NOT_FOUND,
+            Self::Validation(_) => StatusCode::BAD_REQUEST,
+            Self::Authentication(_) => StatusCode::UNAUTHORIZED,
+            Self::Authorization(_) => StatusCode::FORBIDDEN,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    fn error_response(&self) -> HttpResponse {
+        HttpResponse::build(self.status_code())
+            .json(serde_json::json!({ "error": self.to_string() }))
+    }
 }
 
 /// Result type alias using the common Error type.

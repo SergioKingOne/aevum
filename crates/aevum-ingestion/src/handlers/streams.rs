@@ -1,17 +1,12 @@
 use crate::{producer::KafkaProducer, validation::StreamValidator};
-use aevum_common::{
-    Error, Result,
-    models::Stream,
-    utils::{current_timestamp, generate_id},
+use actix_web::{
+    HttpResponse,
+    web::{Data, Json, Path},
 };
-use axum::{
-    Json,
-    extract::{Path, State},
-    http::StatusCode,
-};
+use aevum_common::{Error, Result, models::Stream, utils::generate_id};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::info;
 use uuid::Uuid;
 
 /// Request for creating a new stream.
@@ -72,9 +67,9 @@ pub struct ListStreamsResponse {
 
 /// Handler for creating a new stream.
 pub async fn create_stream(
-    State(producer): State<Arc<KafkaProducer>>,
+    producer: Data<Arc<KafkaProducer>>,
     Json(request): Json<CreateStreamRequest>,
-) -> Result<(StatusCode, Json<StreamResponse>)> {
+) -> Result<HttpResponse> {
     info!("Creating new stream: {}", request.name);
 
     // Build stream from request
@@ -104,51 +99,26 @@ pub async fn create_stream(
 
     // Return response
     let response = StreamResponse { stream };
-    Ok((StatusCode::CREATED, Json(response)))
+    Ok(HttpResponse::Created().json(response))
 }
 
 /// Handler for listing all streams.
-pub async fn list_streams() -> Result<(StatusCode, Json<ListStreamsResponse>)> {
+pub async fn list_streams() -> Result<HttpResponse> {
     info!("Listing all streams");
 
     // TODO: In a real implementation, we would fetch streams from a repository
     // For MVP, return an empty list
     let response = ListStreamsResponse { streams: vec![] };
 
-    Ok((StatusCode::OK, Json(response)))
+    Ok(HttpResponse::Ok().json(response))
 }
 
 /// Handler for getting a specific stream.
-pub async fn get_stream(Path(id): Path<Uuid>) -> Result<(StatusCode, Json<StreamResponse>)> {
+pub async fn get_stream(path: Path<(Uuid,)>) -> Result<HttpResponse> {
+    let id = path.into_inner().0;
     info!("Getting stream: {}", id);
 
     // TODO: We would fetch the stream from a repository
-    // For MVP, return a not found error
-    Err(Error::NotFound(format!("Stream not found: {}", id)))
-}
-
-/// Handler for updating a stream.
-pub async fn update_stream(
-    State(producer): State<Arc<KafkaProducer>>,
-    Path(id): Path<Uuid>,
-    Json(request): Json<UpdateStreamRequest>,
-) -> Result<(StatusCode, Json<StreamResponse>)> {
-    info!("Updating stream: {}", id);
-
-    // TODO: We would fetch the stream from a repository
-    // For MVP, return a not found error
-    Err(Error::NotFound(format!("Stream not found: {}", id)))
-}
-
-/// Handler for deleting a stream.
-pub async fn delete_stream(
-    State(producer): State<Arc<KafkaProducer>>,
-    Path(id): Path<Uuid>,
-) -> Result<StatusCode> {
-    info!("Deleting stream: {}", id);
-
-    // TODO: We would fetch the stream from a repository
-    // and delete it
     // For MVP, return a not found error
     Err(Error::NotFound(format!("Stream not found: {}", id)))
 }

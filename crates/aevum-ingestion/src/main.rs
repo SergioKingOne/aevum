@@ -1,5 +1,6 @@
 use aevum_ingestion::{config::Config, server::Server};
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::{error, info};
 
 #[tokio::main]
@@ -14,7 +15,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Configuration loaded successfully");
 
     // Create and start the server
-    let server = Arc::new(Server::new(config).await?);
+    let server = Arc::new(Mutex::new(Server::new(config).await?));
     info!("Server initialized");
 
     // Handle shutdown gracefully
@@ -43,11 +44,11 @@ async fn main() -> anyhow::Result<()> {
         }
 
         info!("Shutting down gracefully");
-        server_clone.shutdown().await;
+        server_clone.lock().await.shutdown().await;
     });
 
     // Start the server
-    if let Err(e) = server.start().await {
+    if let Err(e) = server.lock().await.start().await {
         error!("Server error: {}", e);
         return Err(e.into());
     }

@@ -1,18 +1,17 @@
-use crate::{producer::KafkaProducer, validation::DataValidator};
+use crate::producer::KafkaProducer;
+use actix_web::{
+    HttpResponse,
+    web::{Data, Json, Path},
+};
 use aevum_common::{
     Error, Result,
-    models::{DataPoint, Stream},
+    models::DataPoint,
     utils::{current_timestamp, generate_id},
-};
-use axum::{
-    Json,
-    extract::{Path, State},
-    http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::info;
 use uuid::Uuid;
 
 /// Request for single data point ingestion.
@@ -47,10 +46,11 @@ pub struct IngestResponse {
 
 /// Handler for ingesting a single data point.
 pub async fn ingest_data(
-    State(producer): State<Arc<KafkaProducer>>,
-    Path(stream_id): Path<Uuid>,
+    producer: Data<Arc<KafkaProducer>>,
+    path: Path<(Uuid,)>,
     Json(request): Json<IngestRequest>,
-) -> Result<(StatusCode, Json<IngestResponse>)> {
+) -> Result<HttpResponse> {
+    let stream_id = path.into_inner().0;
     info!("Ingesting data point for stream: {}", stream_id);
 
     // TODO: We would fetch the stream from a repository
@@ -73,15 +73,16 @@ pub async fn ingest_data(
         ids: vec![data_point.id],
     };
 
-    Ok((StatusCode::CREATED, Json(response)))
+    Ok(HttpResponse::Created().json(response))
 }
 
 /// Handler for ingesting a batch of data points.
 pub async fn ingest_batch(
-    State(producer): State<Arc<KafkaProducer>>,
-    Path(stream_id): Path<Uuid>,
+    producer: Data<Arc<KafkaProducer>>,
+    path: Path<(Uuid,)>,
     Json(request): Json<BatchIngestRequest>,
-) -> Result<(StatusCode, Json<IngestResponse>)> {
+) -> Result<HttpResponse> {
+    let stream_id = path.into_inner().0;
     let count = request.data.len();
     info!(
         "Ingesting batch of {} data points for stream: {}",
@@ -121,7 +122,7 @@ pub async fn ingest_batch(
         ids,
     };
 
-    Ok((StatusCode::CREATED, Json(response)))
+    Ok(HttpResponse::Created().json(response))
 }
 
 /// Parse timestamp from string or use current time.

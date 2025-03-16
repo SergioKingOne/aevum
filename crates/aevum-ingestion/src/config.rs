@@ -28,10 +28,6 @@ pub struct ServerConfig {
     /// Port to listen on
     #[builder(default = default_port())]
     pub port: u16,
-
-    /// Request timeout in seconds
-    #[builder(default = default_timeout())]
-    pub timeout_seconds: u64,
 }
 
 /// Kafka configuration.
@@ -75,10 +71,6 @@ fn default_host() -> String {
 
 fn default_port() -> u16 {
     8080
-}
-
-fn default_timeout() -> u64 {
-    30
 }
 
 fn default_client_id() -> String {

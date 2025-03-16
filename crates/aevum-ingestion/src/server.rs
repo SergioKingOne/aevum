@@ -1,26 +1,17 @@
 use crate::{config::Config, handlers, producer::KafkaProducer};
+use actix_cors::Cors;
+use actix_web::{App, HttpServer, dev::Server as ActixServer, middleware, web};
 use aevum_common::Error;
-use axum::{
-    Router,
-    error_handling::HandleErrorLayer,
-    extract::Extension,
-    http::StatusCode,
-    routing::{delete, get, post},
-};
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::oneshot;
-use tower::{BoxError, ServiceBuilder};
-use tower_http::{
-    cors::{Any, CorsLayer},
-    trace::TraceLayer,
-};
-use tracing::{error, info};
+use tracing::info;
 
 /// The HTTP server for the Ingestion Service.
 pub struct Server {
     config: Config,
     producer: Arc<KafkaProducer>,
     shutdown_tx: Option<oneshot::Sender<()>>,
+    server: Option<ActixServer>,
 }
 
 impl Server {
@@ -35,51 +26,13 @@ impl Server {
             config,
             producer: Arc::new(producer),
             shutdown_tx: None,
+            server: None,
         })
     }
 
     /// Start the HTTP server.
-    pub async fn start(&self) -> Result<(), Error> {
+    pub async fn start(&mut self) -> Result<(), Error> {
         let producer = Arc::clone(&self.producer);
-
-        // Build router with all routes
-        let app = Router::new()
-            // Health check route
-            .route("/health", get(handlers::health::check))
-            // Stream management routes
-            .route("/streams", get(handlers::streams::list_streams))
-            .route("/streams", post(handlers::streams::create_stream))
-            .route("/streams/:id", get(handlers::streams::get_stream))
-            .route("/streams/:id", post(handlers::streams::update_stream))
-            .route("/streams/:id", delete(handlers::streams::delete_stream))
-            // Data ingestion routes
-            .route("/ingest/:stream_id", post(handlers::ingest::ingest_data))
-            .route(
-                "/ingest/:stream_id/batch",
-                post(handlers::ingest::ingest_batch),
-            )
-            // Add middleware
-            .layer(
-                ServiceBuilder::new()
-                    // Add error handling
-                    .layer(HandleErrorLayer::new(|e: BoxError| async move {
-                        error!("Request failed: {}", e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    }))
-                    // Add timeout
-                    .timeout(Duration::from_secs(self.config.server.timeout_seconds))
-                    // Add tracing
-                    .layer(TraceLayer::new_for_http())
-                    // Add CORS
-                    .layer(
-                        CorsLayer::new()
-                            .allow_origin(Any)
-                            .allow_methods(Any)
-                            .allow_headers(Any),
-                    ),
-            )
-            // Add state
-            .with_state(producer);
 
         // Get address to bind to
         let addr = format!("{}:{}", self.config.server.host, self.config.server.port)
@@ -90,30 +43,78 @@ impl Server {
 
         // Create shutdown channel
         let (tx, rx) = oneshot::channel::<()>();
+        self.shutdown_tx = Some(tx);
 
-        // Store sender for shutdown
-        let this = unsafe {
-            // This is safe because we're making the mutable access exclusive
-            (self as *const Self as *mut Self).as_mut().unwrap()
-        };
-        this.shutdown_tx = Some(tx);
+        // Build and start the server
+        let server = HttpServer::new(move || {
+            // Configure CORS
+            let cors = Cors::default()
+                .allow_any_origin()
+                .allow_any_method()
+                .allow_any_header();
 
-        // Start server
-        axum::Server::bind(&addr)
-            .serve(app.into_make_service())
-            .with_graceful_shutdown(async {
-                rx.await.ok();
-                info!("Server shutting down");
-            })
-            .await
-            .map_err(|e| Error::Unexpected(format!("Server error: {}", e)))?;
+            App::new()
+                // Configure state
+                .app_data(web::Data::new(producer.clone()))
+                // Configure middlewares
+                .wrap(middleware::Logger::default())
+                // We'll handle timeouts at a different level - add version header for now
+                .wrap(
+                    middleware::DefaultHeaders::new().add(("X-Version", env!("CARGO_PKG_VERSION"))),
+                )
+                .wrap(cors)
+                // Configure routes
+                // Health check route
+                .route("/health", web::get().to(handlers::health::check))
+                // Stream management routes
+                .route("/streams", web::get().to(handlers::streams::list_streams))
+                .route("/streams", web::post().to(handlers::streams::create_stream))
+                .route(
+                    "/streams/{id}",
+                    web::get().to(handlers::streams::get_stream),
+                )
+                // Data ingestion routes
+                .route(
+                    "/ingest/{stream_id}",
+                    web::post().to(handlers::ingest::ingest_data),
+                )
+                .route(
+                    "/ingest/{stream_id}/batch",
+                    web::post().to(handlers::ingest::ingest_batch),
+                )
+        })
+        .bind(addr)
+        .map_err(|e| Error::Unexpected(format!("Failed to bind to address: {}", e)))?
+        .run();
+
+        // Store server instance
+        self.server = Some(server);
+
+        // Extract server handle to await in another task
+        let server_handle = self.server.as_ref().unwrap().handle();
+
+        // Spawn a task to wait for shutdown signal
+        tokio::spawn(async move {
+            // Wait for shutdown signal
+            let _ = rx.await;
+            info!("Server shutting down");
+            // Stop server gracefully
+            server_handle.stop(true).await;
+        });
+
+        // Start server - take ownership of the server to await it
+        if let Some(server) = self.server.take() {
+            server
+                .await
+                .map_err(|e| Error::Unexpected(format!("Server error: {}", e)))?;
+        }
 
         Ok(())
     }
 
     /// Gracefully shut down the server.
-    pub async fn shutdown(&self) {
-        if let Some(tx) = &self.shutdown_tx {
+    pub async fn shutdown(&mut self) {
+        if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
             info!("Shutdown signal sent");
         }

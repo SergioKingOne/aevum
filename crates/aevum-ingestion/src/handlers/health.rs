@@ -1,4 +1,4 @@
-use axum::{Json, http::StatusCode};
+use actix_web::HttpResponse;
 use serde::{Deserialize, Serialize};
 
 /// Response for the health check endpoint.
@@ -12,11 +12,11 @@ pub struct HealthResponse {
 }
 
 /// Handler for the health check endpoint.
-pub async fn check() -> (StatusCode, Json<HealthResponse>) {
+pub async fn check() -> HttpResponse {
     let response = HealthResponse {
         status: "ok".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     };
 
-    (StatusCode::OK, Json(response))
+    HttpResponse::Ok().json(response)
 }

@@ -12,3 +12,4 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
 bon = { workspace = true }
+actix-web = { version = "4.4", features = ["rustls"] }
