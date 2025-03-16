@@ -5,11 +5,11 @@ edition = "2024"
 
 [workspace]
 members = [
-    "crates/aevum-common",
-    "crates/aevum-ingestion",
-    "crates/aevum-processor",
-    "crates/aevum-storage",
-    "crates/aevum-api",
+    "crates/aevum_common",
+    "crates/aevum_ingestion",
+    "crates/aevum_processor",
+    "crates/aevum_storage",
+    "crates/aevum_api",
 ]
 
 [workspace.dependencies]

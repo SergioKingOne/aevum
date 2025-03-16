@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-aevum-common = { path = "../aevum-common" }
+aevum-common = { path = "../aevum_common" }
 
 tokio = { workspace = true }
 async-trait = { workspace = true }
