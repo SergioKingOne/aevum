@@ -1,0 +1,143 @@
+version: "3.8"
+
+services:
+  # TimescaleDB (PostgreSQL with time-series extensions)
+  timescaledb:
+    image: timescale/timescaledb:latest-pg14
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: aevum
+      POSTGRES_PASSWORD: aevum_password
+      POSTGRES_DB: aevum
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aevum"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching and pub/sub
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Zookeeper
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+
+  # Kafka
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    depends_on:
+      - zookeeper
+
+  # Kafka UI
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    depends_on:
+      - kafka
+
+  # Aevum Ingestion Service
+  aevum-ingestion:
+    build:
+      context: .
+      dockerfile: ./docker/ingestion.Dockerfile
+    ports:
+      - "8081:8080"
+    environment:
+      AEVUM_INGESTION__SERVER__HOST: 0.0.0.0
+      AEVUM_INGESTION__SERVER__PORT: 8080
+      AEVUM_INGESTION__KAFKA__BROKERS: kafka:9092
+      AEVUM_INGESTION__KAFKA__TOPICS__RAW_DATA: aevum.raw_data
+      AEVUM_INGESTION__KAFKA__TOPICS__STREAM_METADATA: aevum.stream_metadata
+      AEVUM_INGESTION__REDIS__URL: redis://redis:6379
+    depends_on:
+      - kafka
+      - redis
+
+  # Aevum Processor Service
+  aevum-processor:
+    build:
+      context: .
+      dockerfile: ./docker/processor.Dockerfile
+    environment:
+      AEVUM_PROCESSOR__KAFKA__BROKERS: kafka:9092
+      AEVUM_PROCESSOR__KAFKA__TOPICS__RAW_DATA: aevum.raw_data
+      AEVUM_PROCESSOR__KAFKA__TOPICS__PROCESSED_DATA: aevum.processed_data
+      AEVUM_PROCESSOR__KAFKA__TOPICS__STREAM_METADATA: aevum.stream_metadata
+      AEVUM_PROCESSOR__KAFKA__TOPICS__PIPELINES: aevum.pipelines
+      AEVUM_PROCESSOR__REDIS__URL: redis://redis:6379
+    depends_on:
+      - kafka
+      - redis
+
+  # Aevum Storage Service
+  aevum-storage:
+    build:
+      context: .
+      dockerfile: ./docker/storage.Dockerfile
+    environment:
+      AEVUM_STORAGE__DATABASE__URL: postgres://aevum:aevum_password@timescaledb:5432/aevum
+      AEVUM_STORAGE__KAFKA__BROKERS: kafka:9092
+      AEVUM_STORAGE__KAFKA__TOPICS__RAW_DATA: aevum.raw_data
+      AEVUM_STORAGE__KAFKA__TOPICS__PROCESSED_DATA: aevum.processed_data
+      AEVUM_STORAGE__KAFKA__TOPICS__STREAM_METADATA: aevum.stream_metadata
+    depends_on:
+      - timescaledb
+      - kafka
+
+  # Aevum API Service
+  aevum-api:
+    build:
+      context: .
+      dockerfile: ./docker/api.Dockerfile
+    ports:
+      - "8082:8080"
+    environment:
+      AEVUM_API__SERVER__HOST: 0.0.0.0
+      AEVUM_API__SERVER__PORT: 8080
+      AEVUM_API__DATABASE__URL: postgres://aevum:aevum_password@timescaledb:5432/aevum
+    depends_on:
+      - timescaledb
+
+volumes:
+  timescaledb_data:
+  redis_data:
+  zookeeper_data:
+  zookeeper_log:
+  kafka_data:
